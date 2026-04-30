@@ -5,18 +5,22 @@ export type TextItem = {
   pdfX: number;
   pdfY: number; // baseline y in PDF points
   pdfWidth: number;
-  pdfHeight: number; // font height in PDF points
+  pdfHeight: number;
   fontSize: number; // PDF points
   fontName: string;
+  fontFamily: string; // CSS font-family
+  bold: boolean;
+  italic: boolean;
+  color: string; // CSS color
   originalText: string;
   text: string; // current (possibly edited) text
 };
 
 export type PageInfo = {
   pageIndex: number;
-  widthPt: number; // PDF points
+  widthPt: number;
   heightPt: number;
-  viewportWidth: number; // CSS pixels at render scale
+  viewportWidth: number;
   viewportHeight: number;
   scale: number;
   canvas: HTMLCanvasElement;

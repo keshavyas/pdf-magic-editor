@@ -147,7 +147,7 @@ const Index = () => {
         {pages && (
           <div className="flex flex-col gap-8">
             <p className="text-center text-sm text-muted-foreground">
-              Click any highlighted text region to edit. Press <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 text-xs">Enter</kbd> to save.
+              Click any text to edit it directly — same size, font, and color as the original. Press <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 text-xs">Enter</kbd> when done.
             </p>
             {pages.map((p) => (
               <PdfPage
