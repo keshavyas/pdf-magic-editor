@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PageInfo, TextItem } from "@/lib/pdfTypes";
 
 interface Props {
@@ -7,10 +7,12 @@ interface Props {
 }
 
 export const PdfPage = ({ page, onChangeItem }: Props) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasHostRef = useRef<HTMLDivElement>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // Effective scale: CSS pixels per PDF point
+  const [pxPerPt, setPxPerPt] = useState(1);
 
-  // Mount the offscreen canvas into the DOM
+  // Mount the canvas (background with original text erased)
   useEffect(() => {
     const host = canvasHostRef.current;
     if (!host) return;
@@ -18,82 +20,89 @@ export const PdfPage = ({ page, onChangeItem }: Props) => {
     page.canvas.style.display = "block";
     page.canvas.style.width = "100%";
     page.canvas.style.height = "auto";
+    page.canvas.style.userSelect = "none";
+    page.canvas.style.pointerEvents = "none";
     host.appendChild(page.canvas);
   }, [page]);
 
-  // Convert PDF coords (origin bottom-left, points) -> overlay coords (origin top-left, % of page)
-  const toOverlay = (item: TextItem) => {
-    const { pdfX, pdfY, pdfWidth, fontSize } = item;
-    const leftPct = (pdfX / page.widthPt) * 100;
-    // pdf baseline -> top of text box
-    const topPdf = pdfY + fontSize; // approx top in PDF coords
-    const topFromTopPt = page.heightPt - topPdf;
-    const topPct = (topFromTopPt / page.heightPt) * 100;
-    const widthPct = (pdfWidth / page.widthPt) * 100;
-    const heightPct = (fontSize * 1.25 / page.heightPt) * 100;
-    return { leftPct, topPct, widthPct, heightPct };
+  // Track effective scale to size text correctly at any viewport
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      if (w > 0) setPxPerPt(w / page.widthPt);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [page.widthPt]);
+
+  const renderItem = (item: TextItem) => {
+    // Convert PDF coords (origin bottom-left, points) -> CSS px from top-left of page
+    const leftPx = item.pdfX * pxPerPt;
+    const topPx = (page.heightPt - item.pdfY - item.fontSize) * pxPerPt;
+    const fontSizePx = item.fontSize * pxPerPt;
+    const widthPx = item.pdfWidth * pxPerPt;
+    const isEdited = item.text !== item.originalText;
+
+    return (
+      <span
+        key={item.id}
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck={false}
+        onBlur={(e) => {
+          const v = (e.currentTarget.textContent || "").replace(/\u00A0/g, " ");
+          if (v !== item.text) onChangeItem(item.id, v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).blur();
+          }
+        }}
+        title={item.originalText}
+        className="pdf-text-item"
+        style={{
+          position: "absolute",
+          left: `${leftPx}px`,
+          top: `${topPx}px`,
+          minWidth: `${Math.max(widthPx, fontSizePx * 0.5)}px`,
+          height: `${fontSizePx * 1.25}px`,
+          lineHeight: `${fontSizePx * 1.25}px`,
+          fontSize: `${fontSizePx}px`,
+          fontFamily: item.fontFamily,
+          fontWeight: item.bold ? 700 : 400,
+          fontStyle: item.italic ? "italic" : "normal",
+          color: item.color,
+          whiteSpace: "pre",
+          cursor: "text",
+          padding: "0 1px",
+          borderRadius: 2,
+          outline: "none",
+          background: isEdited ? "hsl(var(--primary) / 0.08)" : "transparent",
+          boxShadow: isEdited ? "inset 0 0 0 1px hsl(var(--primary) / 0.5)" : undefined,
+          transition: "background 120ms",
+        }}
+      >
+        {item.text}
+      </span>
+    );
   };
 
   return (
     <div
+      ref={containerRef}
       className="relative mx-auto w-full max-w-4xl overflow-hidden rounded-lg bg-white"
-      style={{ boxShadow: "var(--shadow-elegant)", aspectRatio: `${page.widthPt} / ${page.heightPt}` }}
+      style={{
+        boxShadow: "var(--shadow-elegant)",
+        aspectRatio: `${page.widthPt} / ${page.heightPt}`,
+      }}
     >
       <div ref={canvasHostRef} className="absolute inset-0" />
-      <div className="absolute inset-0">
-        {page.items.map((item) => {
-          const { leftPct, topPct, widthPct, heightPct } = toOverlay(item);
-          const isEditing = editingId === item.id;
-          const isEdited = item.text !== item.originalText;
-          return (
-            <div
-              key={item.id}
-              className="group/item absolute"
-              style={{
-                left: `${leftPct}%`,
-                top: `${topPct}%`,
-                width: `${Math.max(widthPct, 2)}%`,
-                height: `${Math.max(heightPct, 1.5)}%`,
-              }}
-            >
-              {isEditing ? (
-                <input
-                  autoFocus
-                  defaultValue={item.text}
-                  onBlur={(e) => {
-                    onChangeItem(item.id, e.target.value);
-                    setEditingId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      onChangeItem(item.id, (e.target as HTMLInputElement).value);
-                      setEditingId(null);
-                    } else if (e.key === "Escape") {
-                      setEditingId(null);
-                    }
-                  }}
-                  className="absolute inset-0 w-full rounded-sm border-2 border-primary bg-white px-1 text-foreground outline-none"
-                  style={{
-                    fontSize: `calc(${heightPct}cqh / 1.25)`,
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setEditingId(item.id)}
-                  title={item.text}
-                  className={[
-                    "absolute inset-0 w-full cursor-text rounded-sm transition-colors",
-                    isEdited
-                      ? "bg-primary/15 ring-1 ring-primary"
-                      : "hover:bg-primary/10 hover:ring-1 hover:ring-primary/50",
-                  ].join(" ")}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <div className="absolute inset-0">{page.items.map(renderItem)}</div>
     </div>
   );
 };
